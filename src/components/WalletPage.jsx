@@ -1,14 +1,14 @@
-import React, { useState} from 'react';
-import { 
-  Card, 
-  Row, 
-  Col, 
-  Typography, 
-  Table, 
-  Spin, 
-  Input, 
-  DatePicker, 
-  Checkbox, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Card,
+  Row,
+  Col,
+  Typography,
+  Table,
+  Spin,
+  Input,
+  DatePicker,
+  Checkbox,
   Empty,
   Statistic,
   Tabs,
@@ -18,209 +18,229 @@ import {
   ConfigProvider,
   theme,
   Button,
-  Select,
-  message
+  message,
 } from 'antd';
-import { 
+import {
   SearchOutlined,
   FilterOutlined,
-  DownloadOutlined,
   DollarOutlined,
-  TransactionOutlined,
   HistoryOutlined,
-  InfoCircleOutlined,
-  ArrowUpOutlined,
-  ArrowDownOutlined
+  SyncOutlined,
 } from '@ant-design/icons';
 import { useUser } from '../context/AuthContext';
+import '../assets/css/components/WalletPage.css'; 
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { RangePicker } = DatePicker;
 const { TabPane } = Tabs;
-const { Option } = Select;
 
 const WalletPage = () => {
-  const { user, realityCheck, statement, transactions, loading } = useUser();
+  const { activeAccount, balance, loading: authLoading, sendAuthorizedRequest } = useUser();
   const { token } = theme.useToken();
+
+  // State management
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState([]);
-  const [visibleColumns, setVisibleColumns] = useState(['Date', 'Type', 'Amount', 'Description']);
+  const [visibleColumns, setVisibleColumns] = useState(['Date', 'Type', 'Amount', 'Transaction ID', 'Payout']);
   const [activeTab, setActiveTab] = useState('statement');
-  const [exportFormat, setExportFormat] = useState('csv');
+  const [statements, setStatements] = useState([]);
+  const [realityCheck, setRealityCheck] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [statementCount, setStatementCount] = useState(0);
 
-  // Format date to human-readable form
+  const accountId = activeAccount?.loginid;
+  const isLoading = authLoading || loading;
+
+  // Helper functions
   const formatDate = (timestamp) => {
     return new Date(timestamp * 1000).toLocaleString();
   };
 
-  // Format currency with proper symbol
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD'
+      currency: 'USD',
     }).format(amount);
   };
 
-  // Filtered Statement Data
-  const filteredStatement = statement?.statement?.transactions?.filter((item) => {
-    const transactionDate = new Date(item.purchase_time * 1000);
-    const matchesSearch = item.longcode.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesDateRange =
-      (!dateRange[0] || transactionDate >= dateRange[0]) &&
-      (!dateRange[1] || transactionDate <= dateRange[1]);
-    return matchesSearch && matchesDateRange;
-  }) || [];
+  // Data fetching
+  const fetchData = async () => {
+    if (!accountId) return;
 
-  // Statement Table Columns
-  const statementColumns = [
-    {
-      title: 'Date',
-      dataIndex: 'purchase_time',
-      key: 'purchase_time',
-      render: (timestamp) => formatDate(timestamp),
-      sorter: (a, b) => a.purchase_time - b.purchase_time,
-      visible: visibleColumns.includes('Date'),
-    },
-    {
-      title: 'Type',
-      dataIndex: 'action_type',
-      key: 'action_type',
-      render: (type) => (
-        <Tag color={type === 'buy' ? token.colorSuccess : token.colorError}>
-          {type.toUpperCase()}
-        </Tag>
-      ),
-      visible: visibleColumns.includes('Type'),
-    },
-    {
-      title: 'Amount',
-      dataIndex: 'amount',
-      key: 'amount',
-      render: (amount) => (
-        <Text type={amount >= 0 ? 'success' : 'danger'}>
-          {formatCurrency(amount)}
-        </Text>
-      ),
-      sorter: (a, b) => a.amount - b.amount,
-      visible: visibleColumns.includes('Amount'),
-    },
-    {
-      title: 'Description',
-      dataIndex: 'longcode',
-      key: 'longcode',
-      ellipsis: true,
-      visible: visibleColumns.includes('Description'),
-    },
-    {
-      title: 'Status',
-      dataIndex: 'status',
-      key: 'status',
-      render: (status) => (
-        <Tag color={status === 'won' ? token.colorSuccess : 
-                    status === 'lost' ? token.colorError : 
-                    token.colorWarning}>
-          {status?.toUpperCase() || 'PENDING'}
-        </Tag>
-      ),
-      visible: visibleColumns.includes('Status'),
+    setLoading(true);
+    setError(null);
+
+    try {
+      const statementsRes = await sendAuthorizedRequest({
+        statement: 1,
+        limit: 100,
+        loginid: accountId,
+      });
+
+      const transactions = statementsRes?.statement?.transactions || [];
+      setStatements(transactions);
+      setStatementCount(transactions.length);
+      localStorage.setItem(`statements_${accountId}`, JSON.stringify(transactions));
+
+      const realityRes = await sendAuthorizedRequest({
+        reality_check: 1,
+        loginid: accountId,
+      });
+      setRealityCheck(realityRes?.reality_check || null);
+      localStorage.setItem(`realityCheck_${accountId}`, JSON.stringify(realityRes?.reality_check || null));
+    } catch (err) {
+      console.error('Error fetching wallet data:', err);
+      setError('Failed to load wallet data. Please try again.');
+      message.error('Failed to load wallet data');
+    } finally {
+      setLoading(false);
     }
-  ].filter((col) => col.visible);
-
-  // Transaction Table Columns
-  const transactionColumns = [
-    {
-      title: 'Date',
-      dataIndex: 'purchase_time',
-      key: 'purchase_time',
-      render: (timestamp) => formatDate(timestamp),
-      sorter: (a, b) => a.purchase_time - b.purchase_time,
-    },
-    {
-      title: 'Type',
-      dataIndex: 'action',
-      key: 'action',
-      render: (type) => (
-        <Tag color={type === 'deposit' ? token.colorSuccess : 
-                    type === 'withdrawal' ? token.colorError : 
-                    token.colorPrimary}>
-          {type.toUpperCase()}
-        </Tag>
-      ),
-    },
-    {
-      title: 'Amount',
-      dataIndex: 'amount',
-      key: 'amount',
-      render: (amount) => (
-        <Text type={amount >= 0 ? 'success' : 'danger'}>
-          {formatCurrency(amount)}
-        </Text>
-      ),
-      sorter: (a, b) => a.amount - b.amount,
-    },
-    {
-      title: 'Description',
-      dataIndex: 'longcode',
-      key: 'longcode',
-      ellipsis: true,
-    },
-    {
-      title: 'Reference',
-      dataIndex: 'id',
-      key: 'id',
-      render: (id) => <Text code>{id?.substring(0, 8)}</Text>,
-    }
-  ];
-
-  // Reality Check Table Columns
-  const realityCheckColumns = [
-    {
-      title: 'Session Start',
-      dataIndex: 'start_time',
-      key: 'start_time',
-      render: (timestamp) => formatDate(timestamp),
-      sorter: (a, b) => a.start_time - b.start_time,
-    },
-    {
-      title: 'Transactions',
-      dataIndex: 'num_transactions',
-      key: 'num_transactions',
-      sorter: (a, b) => a.num_transactions - b.num_transactions,
-    },
-    {
-      title: 'Purchases',
-      dataIndex: 'total_purchases',
-      key: 'total_purchases',
-      render: (amount) => formatCurrency(amount),
-      sorter: (a, b) => a.total_purchases - b.total_purchases,
-    },
-    {
-      title: 'Profit/Loss',
-      dataIndex: 'total_profit_loss',
-      key: 'total_profit_loss',
-      render: (amount) => (
-        <Text type={amount >= 0 ? 'success' : 'danger'}>
-          {formatCurrency(amount)}
-        </Text>
-      ),
-      sorter: (a, b) => a.total_profit_loss - b.total_profit_loss,
-    },
-    {
-      title: 'Duration',
-      dataIndex: 'session_duration',
-      key: 'session_duration',
-      render: (seconds) => {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        return `${hours}h ${minutes}m`;
-      },
-    }
-  ];
-
-  const handleExport = () => {
-    message.info(`Exporting data as ${exportFormat.toUpperCase()}`);
-    // Export logic would go here
   };
+
+  // Initial data load
+  useEffect(() => {
+    if (accountId) {
+      const lastFetchTime = localStorage.getItem(`lastFetchTime_${accountId}`);
+      const oneHour = 60 * 60 * 1000;
+      if (lastFetchTime && Date.now() - parseInt(lastFetchTime) > oneHour) {
+        localStorage.removeItem(`statements_${accountId}`);
+        localStorage.removeItem(`realityCheck_${accountId}`);
+      }
+
+      const cachedStatements = localStorage.getItem(`statements_${accountId}`);
+      if (cachedStatements) {
+        const parsed = JSON.parse(cachedStatements);
+        setStatements(parsed);
+        setStatementCount(parsed.length);
+      }
+
+      const cachedReality = localStorage.getItem(`realityCheck_${accountId}`);
+      if (cachedReality) {
+        setRealityCheck(JSON.parse(cachedReality));
+      }
+
+      fetchData();
+      localStorage.setItem(`lastFetchTime_${accountId}`, Date.now().toString());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
+
+  // Filtered data
+  const filteredStatements = useMemo(() => {
+    if (!statements.length) return [];
+
+    return statements.filter((item) => {
+      const timestamp = item.purchase_time || item.transaction_time;
+      if (!timestamp) return false;
+
+      const transactionDate = new Date(timestamp * 1000);
+      const matchesSearch = searchTerm
+        ? item.longcode?.toLowerCase().includes(searchTerm.toLowerCase())
+        : true;
+
+      const matchesDateRange =
+        dateRange.length === 2
+          ? transactionDate >= dateRange[0] && transactionDate <= dateRange[1]
+          : true;
+
+      return matchesSearch && matchesDateRange;
+    });
+  }, [statements, searchTerm, dateRange]);
+
+  // Table columns
+  const statementColumns = useMemo(
+    () => [
+      {
+        title: 'Date',
+        dataIndex: 'purchase_time',
+        key: 'purchase_time',
+        width: 160,
+        render: (_, record) => {
+          const timestamp = record.purchase_time || record.transaction_time;
+          return timestamp ? formatDate(timestamp) : 'N/A';
+        },
+        sorter: (a, b) => {
+          const aTime = a.purchase_time || a.transaction_time;
+          const bTime = b.purchase_time || b.transaction_time;
+          if (aTime === bTime) {
+            return a.transaction_id - b.transaction_id;
+          }
+          return aTime - bTime;
+        },
+        visible: visibleColumns.includes('Date'),
+      },
+      {
+        title: 'Type',
+        dataIndex: 'action_type',
+        key: 'action_type',
+        width: 100,
+        render: (type) => {
+          const displayType = type?.toUpperCase() || 'N/A';
+          return (
+            <Tag color={type === 'buy' ? token.colorSuccess : token.colorError}>
+              {displayType}
+            </Tag>
+          );
+        },
+        sorter: (a, b) => a.action_type.localeCompare(b.action_type),
+        visible: visibleColumns.includes('Type'),
+      },
+      {
+        title: 'Amount',
+        dataIndex: 'amount',
+        key: 'amount',
+        width: 120,
+        render: (amount) => (
+          <Text type={amount >= 0 ? 'success' : 'danger'}>{formatCurrency(amount)}</Text>
+        ),
+        sorter: (a, b) => a.amount - b.amount,
+        visible: visibleColumns.includes('Amount'),
+      },
+      {
+        title: 'Transaction ID',
+        dataIndex: 'transaction_id',
+        key: 'transaction_id',
+        width: 140,
+        ellipsis: true,
+        responsive: ['md'],
+        visible: visibleColumns.includes('Transaction ID'),
+      },
+      {
+        title: 'Payout',
+        dataIndex: 'payout',
+        key: 'payout',
+        width: 120,
+        render: (payout) => formatCurrency(payout || 0),
+        responsive: ['md'],
+        visible: visibleColumns.includes('Payout'),
+      },
+    ].filter((col) => col.visible),
+    [visibleColumns, token]
+  );
+
+  const handleRefresh = () => {
+    localStorage.removeItem(`lastFetchTime_${accountId}`);
+    localStorage.removeItem(`statements_${accountId}`);
+    fetchData();
+    message.success('Data refreshed successfully');
+  };
+
+  // Summary card data
+  const summaryData = useMemo(
+    () => ({
+      balance: activeAccount?.balance || 0,
+      deposits: realityCheck?.total_deposits || 0,
+      withdrawals: realityCheck?.total_withdrawals || 0,
+      totalTransactions: statementCount || 0,
+      todayTransactions: realityCheck?.today_transactions || 0,
+      weekTransactions: realityCheck?.week_transactions || 0,
+      profitLoss: realityCheck?.total_profit_loss || 0,
+      winRate: realityCheck?.win_rate || 0,
+      avgProfit: realityCheck?.avg_profit || 0,
+    }),
+    [activeAccount, realityCheck, statementCount]
+  );
 
   return (
     <ConfigProvider
@@ -228,146 +248,106 @@ const WalletPage = () => {
         components: {
           Card: {
             borderRadiusLG: 16,
+            paddingLG: 16,
           },
           Table: {
             headerBg: token.colorFillAlter,
             headerColor: token.colorTextHeading,
-          }
-        }
+            fontSize: 14,
+            stickyScrollBarBg: token.colorBgContainer,
+          },
+        },
       }}
     >
-      <div style={{ padding: '24px', maxWidth: 1400, margin: '0 auto' }}>
+      <div
+        style={{
+          padding: '16px',
+          maxWidth: 1400,
+          margin: '0 auto',
+          // Pass token values as CSS custom properties
+          '--color-fill-alter': token.colorFillAlter,
+          '--color-primary': token.colorPrimary,
+        }}
+      >
         {/* Summary Cards */}
-        <Row gutter={[24, 24]}>
+        <Row gutter={[16, 16]}>
           <Col xs={24} sm={12} md={8}>
-            <Card
-              style={{ 
-                borderRadius: 16,
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
-              }}
-            >
+            <Card style={{ borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
               <Statistic
                 title="Total Balance"
-                value={user?.balance || 0}
+                value={balance}
                 precision={2}
                 prefix={<DollarOutlined />}
                 valueStyle={{ color: token.colorPrimary }}
+                loading={isLoading}
               />
-              <Divider style={{ margin: '12px 0' }} />
-              <Space>
-                <ArrowUpOutlined style={{ color: token.colorSuccess }} />
-                <Text type="secondary">Deposits: {formatCurrency(realityCheck?.reality_check?.total_deposits || 0)}</Text>
-              </Space>
-              <Space style={{ marginTop: 8 }}>
-                <ArrowDownOutlined style={{ color: token.colorError }} />
-                <Text type="secondary">Withdrawals: {formatCurrency(realityCheck?.reality_check?.total_withdrawals || 0)}</Text>
-              </Space>
+              <Divider style={{ margin: '8px 0' }} />
             </Card>
           </Col>
           <Col xs={24} sm={12} md={8}>
-            <Card
-              style={{ 
-                borderRadius: 16,
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
-              }}
-            >
+            <Card style={{ borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
               <Statistic
                 title="Total Transactions"
-                value={realityCheck?.reality_check?.num_transactions || 0}
-                prefix={<TransactionOutlined />}
+                value={summaryData.totalTransactions}
+                prefix={<HistoryOutlined />}
+                loading={isLoading}
               />
-              <Divider style={{ margin: '12px 0' }} />
-              <Space>
-                <Text type="secondary">Today: {realityCheck?.reality_check?.today_transactions || 0}</Text>
-              </Space>
-              <Space style={{ marginTop: 8 }}>
-                <Text type="secondary">This week: {realityCheck?.reality_check?.week_transactions || 0}</Text>
-              </Space>
+              <Divider style={{ margin: '8px 0' }} />
             </Card>
           </Col>
           <Col xs={24} sm={12} md={8}>
-            <Card
-              style={{ 
-                borderRadius: 16,
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
-              }}
-            >
+            <Card style={{ borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
               <Statistic
                 title="Net Profit/Loss"
-                value={realityCheck?.reality_check?.total_profit_loss || 0}
+                value={summaryData.profitLoss}
                 precision={2}
                 prefix={<DollarOutlined />}
                 valueStyle={{
-                  color: (realityCheck?.reality_check?.total_profit_loss || 0) >= 0 
-                    ? token.colorSuccess 
-                    : token.colorError
+                  color: summaryData.profitLoss >= 0 ? token.colorSuccess : token.colorError,
                 }}
+                loading={isLoading}
               />
-              <Divider style={{ margin: '12px 0' }} />
-              <Space>
-                <Text type="secondary">Win rate: {realityCheck?.reality_check?.win_rate || 0}%</Text>
-              </Space>
-              <Space style={{ marginTop: 8 }}>
-                <Text type="secondary">Avg. profit: {formatCurrency(realityCheck?.reality_check?.avg_profit || 0)}</Text>
-              </Space>
+              <Divider style={{ margin: '8px 0' }} />
             </Card>
           </Col>
         </Row>
 
         {/* Search and Filter Section */}
         <Card
-          style={{ 
-            marginTop: 24,
+          style={{
+            marginTop: 16,
             borderRadius: 16,
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
           }}
         >
-          <Row gutter={[24, 24]} align="middle">
+          <Row gutter={[16, 16]} align="middle">
             <Col xs={24} sm={12} md={8}>
               <Input
                 placeholder="Search transactions..."
                 prefix={<SearchOutlined />}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 allowClear
+                disabled={isLoading}
               />
             </Col>
             <Col xs={24} sm={12} md={8}>
               <RangePicker
-                onChange={(dates) => setDateRange(dates)}
+                onChange={setDateRange}
                 style={{ width: '100%' }}
                 suffixIcon={<FilterOutlined />}
+                disabled={isLoading}
               />
-            </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Space>
-                <Select
-                  value={exportFormat}
-                  onChange={setExportFormat}
-                  style={{ width: 120 }}
-                >
-                  <Option value="csv">CSV</Option>
-                  <Option value="pdf">PDF</Option>
-                  <Option value="excel">Excel</Option>
-                </Select>
-                <Button 
-                  type="primary" 
-                  icon={<DownloadOutlined />}
-                  onClick={handleExport}
-                >
-                  Export
-                </Button>
-              </Space>
             </Col>
           </Row>
 
-          {/* Customizable Columns */}
-          <Divider orientation="left" style={{ margin: '16px 0' }}>
+          <Divider orientation="left" style={{ margin: '12px 0' }}>
             <Text type="secondary">Visible Columns</Text>
           </Divider>
           <Checkbox.Group
-            options={['Date', 'Type', 'Amount', 'Description', 'Status']}
+            options={['Date', 'Type', 'Amount', 'Transaction ID', 'Payout']}
             value={visibleColumns}
-            onChange={(checkedValues) => setVisibleColumns(checkedValues)}
+            onChange={setVisibleColumns}
+            disabled={isLoading}
           />
         </Card>
 
@@ -375,11 +355,19 @@ const WalletPage = () => {
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
-          style={{ marginTop: 24 }}
+          style={{ marginTop: 16 }}
           tabBarExtraContent={
-            <Text type="secondary">
-              Last updated: {new Date().toLocaleString()}
-            </Text>
+            <Space>
+              <Text type="secondary">Last updated: {new Date().toLocaleString()}</Text>
+              <Button
+                size="small"
+                icon={<SyncOutlined spin={loading} />}
+                onClick={handleRefresh}
+                disabled={isLoading}
+              >
+                Refresh
+              </Button>
+            </Space>
           }
         >
           <TabPane
@@ -391,116 +379,54 @@ const WalletPage = () => {
             }
             key="statement"
           >
-            <Card
-              style={{ 
-                borderRadius: 16,
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
-              }}
-            >
-              {loading ? (
+            <Card style={{ borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+              {isLoading ? (
                 <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />
-              ) : filteredStatement.length ? (
+              ) : error ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={<Text type="danger">{error}</Text>}
+                >
+                  <Button type="primary" onClick={handleRefresh}>
+                    Retry
+                  </Button>
+                </Empty>
+              ) : filteredStatements.length ? (
                 <Table
-                  dataSource={filteredStatement}
+                  dataSource={filteredStatements}
                   columns={statementColumns}
                   rowKey="transaction_id"
                   expandable={{
                     expandedRowRender: (record) => (
-                      <div style={{ padding: 16 }}>
-                        <Space direction="vertical" size={8}>
+                      <div style={{ padding: 12 }}>
+                        <Space direction="vertical" size={6}>
                           <Text strong>Contract Details</Text>
-                          <Text>ID: <Text code>{record.contract_id}</Text></Text>
-                          <Text>Symbol: <Text code>{record.symbol}</Text></Text>
-                          <Text>Entry: {formatCurrency(record.entry_value)}</Text>
-                          <Text>Exit: {formatCurrency(record.exit_value)}</Text>
+                          <Text>
+                            Contract ID: <Text code>{record.contract_id || 'N/A'}</Text>
+                          </Text>
+                          <Text>
+                            Symbol: <Text code>{record.symbol || 'N/A'}</Text>
+                          </Text>
+                          <Text>Entry: {formatCurrency(record.entry_value || 0)}</Text>
+                          <Text>Exit: {formatCurrency(record.exit_value || 0)}</Text>
                         </Space>
                       </div>
                     ),
-                    rowExpandable: (record) => record.contract_id,
+                    rowExpandable: (record) => !!record.contract_id,
                   }}
                   pagination={{
                     pageSize: 10,
                     showSizeChanger: true,
                     showTotal: (total) => `Total ${total} transactions`,
+                    responsive: true,
                   }}
-                  scroll={{ x: true }}
+                  scroll={{ x: 'max-content' }}
+                  sticky
                 />
               ) : (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    <Text type="secondary">No transactions match your filters</Text>
-                  }
-                />
-              )}
-            </Card>
-          </TabPane>
-
-          <TabPane
-            tab={
-              <Space>
-                <TransactionOutlined />
-                Transactions
-              </Space>
-            }
-            key="transactions"
-          >
-            <Card
-              style={{ 
-                borderRadius: 16,
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
-              }}
-            >
-              {loading ? (
-                <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />
-              ) : transactions?.transaction ? (
-                <Table
-                  dataSource={[transactions.transaction]}
-                  columns={transactionColumns}
-                  rowKey="transaction_id"
-                  pagination={false}
-                />
-              ) : (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    <Text type="secondary">No recent transactions</Text>
-                  }
-                />
-              )}
-            </Card>
-          </TabPane>
-
-          <TabPane
-            tab={
-              <Space>
-                <InfoCircleOutlined />
-                Reality Check
-              </Space>
-            }
-            key="reality"
-          >
-            <Card
-              style={{ 
-                borderRadius: 16,
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
-              }}
-            >
-              {loading ? (
-                <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />
-              ) : realityCheck?.reality_check ? (
-                <Table
-                  dataSource={[realityCheck.reality_check]}
-                  columns={realityCheckColumns}
-                  rowKey="start_time"
-                  pagination={false}
-                />
-              ) : (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    <Text type="secondary">No reality check data available</Text>
-                  }
+                  description={<Text type="secondary">No transactions found</Text>}
                 />
               )}
             </Card>

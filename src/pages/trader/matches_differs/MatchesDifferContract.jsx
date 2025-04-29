@@ -17,7 +17,8 @@ import {
   Alert,
   ConfigProvider,
   theme,
-  Tag
+  Tag,
+  Spin
 } from 'antd';
 import { 
   CheckOutlined,
@@ -33,14 +34,17 @@ import {
   CloseCircleOutlined
 } from '@ant-design/icons';
 import { useUser } from '../../../context/AuthContext';
+import { useContracts } from '../../../context/ContractsContext';
 import RecentTrades from '../../../components/RecentTrades';
 import RequestIdGenerator from '../../../services/uniqueIdGenerator'; 
+import Notification from '../../../utils/Notification';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 
 const MatchesDiffersTrader = () => {
-  const { user } = useUser(); 
+  const { user, sendAuthorizedRequest, isAuthorized, loading, error } = useUser(); 
+  const { addLiveContract } = useContracts();
   const { token } = theme.useToken();
   const [duration, setDuration] = useState(5);
   const [selectedDigit, setSelectedDigit] = useState(5);
@@ -49,7 +53,26 @@ const MatchesDiffersTrader = () => {
   const [amount, setAmount] = useState(10);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [payout, setPayout] = useState(0);
+  const [notification, setNotification] = useState({
+    type: '',
+    content: '',
+    trigger: false,
+  });
 
+  const showNotification = (type, content) => {
+    setNotification({ type, content, trigger: true });
+    setTimeout(() => {
+      setNotification((prev) => ({ ...prev, trigger: false }));
+    }, 500);
+  };
+
+  // Adjust amount when user changes (e.g., after account switch)
+  useEffect(() => {
+    if (user && user.balance) {
+      setAmount(Math.min(amount, user.balance || 1000)); // Ensure amount doesn’t exceed balance
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   // Calculate payout based on amount and symbol
   useEffect(() => {
@@ -59,10 +82,33 @@ const MatchesDiffersTrader = () => {
     setPayout((amount * (1 + payoutMultiplier)).toFixed(2));
   }, [amount, symbol]);
 
-  const handleSubmit = (contractType) => {
+  const handleSubmit = async (contractType) => {
+    if (!user || !isAuthorized) {
+      console.error('User not authorized or no active account');
+      showNotification('warning', 'Please select an account and ensure it is authorized.');
+      return;
+    }
+
+    if (!user.token) {
+      console.error('No valid token for active account');
+      showNotification('error', 'No valid token for the selected account. Please log in again.');
+      return;
+    }
+
+    if (!amount || amount <= 0) {
+      console.error('Invalid amount');
+      showNotification('warning', 'Please enter a valid amount.');
+      return;
+    }
+
+    if (!selectedDigit || selectedDigit < 0 || selectedDigit > 9) {
+      console.error('Invalid selected digit');
+      showNotification('warning', 'Please select a digit between 0 and 9.');
+      return;
+    }
+
     setIsSubmitting(true);
 
-    // Generate a unique request ID for the contract
     const req_id = RequestIdGenerator.generateContractId();
 
     const contractData = {
@@ -72,18 +118,44 @@ const MatchesDiffersTrader = () => {
         amount: amount,
         basis: basis,
         contract_type: contractType === 'matches' ? 'DIGITMATCH' : 'DIGITDIFF',
-        currency: user?.currency || 'USD',
+        currency: user.currency || 'USD',
         duration: duration,
         duration_unit: 't',
         symbol: symbol,
-        barrier: selectedDigit.toString()
+        barrier: selectedDigit.toString(),
       },
-      loginid: user?.loginid,
+      loginid: user.loginid,
       req_id: req_id,
     };
 
-    console.log('Sending contract:', contractData);
-  
+    try {
+      const response = await sendAuthorizedRequest(contractData);
+
+      const contractId = response?.buy?.contract_id;
+      if(!contractId) {
+        throw new Error('No contract_id returned from purchase');
+      }
+
+      const contract = {
+        contract_id: contractId,
+        type: contractType,
+        symbol,
+        status: 'open',
+        details: {
+          amount,
+          currency: user.currency || 'USD'
+        },
+      };
+
+      addLiveContract(contract);
+      
+      showNotification('success', `Successfully purchased ${contractType === 'matches' ? 'Matches' : 'Differs'} contract`);
+    } catch (error) {
+      console.error('Error purchasing contract:', error.message);
+      showNotification('error', `Failed to purchase contract: ${error.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const volatilityOptions = [
@@ -114,7 +186,42 @@ const MatchesDiffersTrader = () => {
       }}
     >
       <Row gutter={[24, 24]}>
+        <Notification
+          type={notification.type}
+          content={notification.content}
+          trigger={notification.trigger}
+        />
         <Col xs={24} md={16}>
+          {loading ? (
+            <Spin tip="Loading account details..." size="large" style={{ display: 'block', margin: '50px auto' }} />
+          ) : error ? (
+            <Alert
+              message="Error"
+              description={error}
+              type="error"
+              showIcon
+              style={{ marginBottom: 24 }}
+            />
+          ) : !user || !isAuthorized ? (
+            <Alert
+              message="No Active Account"
+              description="Please select an account and ensure it is authorized to proceed."
+              type="warning"
+              showIcon
+              style={{ marginBottom: 24 }}
+            />
+          ) : null}
+
+          {error && error.includes('Invalid token') && (
+            <Alert
+              message="Session Expired"
+              description="Your session has expired. Redirecting to login..."
+              type="error"
+              showIcon
+              style={{ marginBottom: 24 }}
+            />
+          )}
+
           <Card
             title={
               <Space>
@@ -142,6 +249,7 @@ const MatchesDiffersTrader = () => {
                   style={{ width: '100%' }}
                   placeholder="Select a volatility index"
                   optionLabelProp="label"
+                  disabled={!user || !isAuthorized}
                 >
                   {volatilityOptions.map(option => (
                     <Option 
@@ -183,9 +291,9 @@ const MatchesDiffersTrader = () => {
                             style={{
                               fontSize: 24,
                               color: isActive ? token.colorPrimary : token.colorBorder,
-                              cursor: 'pointer',
+                              cursor: user && isAuthorized ? 'pointer' : 'not-allowed',
                             }}
-                            onClick={() => setDuration(tick)}
+                            onClick={() => user && isAuthorized && setDuration(tick)}
                           />
                         </Tooltip>
                       </Col>
@@ -215,11 +323,11 @@ const MatchesDiffersTrader = () => {
                           height: 32,
                           lineHeight: '32px',
                           borderRadius: '50%',
-                          cursor: 'pointer',
+                          cursor: user && isAuthorized ? 'pointer' : 'not-allowed',
                           boxShadow: selectedDigit === i ? `0 0 0 2px ${token.colorPrimary}` : 'none',
                           transition: 'all 0.3s'
                         }}
-                        onClick={() => setSelectedDigit(i)}
+                        onClick={() => user && isAuthorized && setSelectedDigit(i)}
                       />
                     </Col>
                   ))}
@@ -239,6 +347,7 @@ const MatchesDiffersTrader = () => {
                   onChange={(e) => setBasis(e.target.value)} 
                   buttonStyle="solid"
                   style={{ width: '100%' }}
+                  disabled={!user || !isAuthorized}
                 >
                   <Radio.Button value="stake" style={{ width: '50%', textAlign: 'center' }}>
                     <DollarOutlined style={{ marginRight: 8 }} />
@@ -265,9 +374,10 @@ const MatchesDiffersTrader = () => {
                   precision={2}
                   prefix={<DollarOutlined />}
                   step={5}
+                  disabled={!user || !isAuthorized}
                 />
                 <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-                  Available balance: {user?.balance?.toFixed(2) || '0.00'} {user?.currency || 'USD'}
+                  Available balance: {(user?.balance || 0).toFixed(2)} {user?.currency || 'USD'}
                 </Text>
               </div>
 
@@ -317,7 +427,7 @@ const MatchesDiffersTrader = () => {
                     }}
                     onClick={() => handleSubmit('matches')}
                     loading={isSubmitting}
-                    disabled={isSubmitting || !user}
+                    disabled={isSubmitting || !user || !isAuthorized}
                   >
                     Matches {selectedDigit}
                   </Button>
@@ -331,7 +441,7 @@ const MatchesDiffersTrader = () => {
                     style={{ height: 48 }}
                     onClick={() => handleSubmit('differs')}
                     loading={isSubmitting}
-                    disabled={isSubmitting || !user}
+                    disabled={isSubmitting || !user || !isAuthorized}
                   >
                     Differs {selectedDigit}
                   </Button>

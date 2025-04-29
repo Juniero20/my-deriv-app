@@ -17,7 +17,8 @@ import {
   Alert,
   ConfigProvider,
   theme,
-  Tag
+  Tag,
+  Spin
 } from 'antd';
 import { 
   NumberOutlined,
@@ -29,21 +30,36 @@ import {
   HistoryOutlined
 } from '@ant-design/icons';
 import { useUser } from '../../../context/AuthContext';
+import { useContracts } from '../../../context/ContractsContext';
 import RecentTrades from '../../../components/RecentTrades';
 import RequestIdGenerator from '../../../services/uniqueIdGenerator'; 
+import Notification from '../../../utils/Notification';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 
 const EvenOddContract = () => {
-  const { user } = useUser(); 
+  const { user, sendAuthorizedRequest, isAuthorized, loading, error } = useUser(); 
+  const { addLiveContract } = useContracts();
   const { token } = theme.useToken();
   const [duration, setDuration] = useState(5);
   const [basis, setBasis] = useState('stake');
   const [symbol, setSymbol] = useState('R_10');
   const [amount, setAmount] = useState(10);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [payout, setPayout] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notification, setNotification] = useState({
+    type: '',
+    content: '',
+    trigger: false,
+  });
+
+  const showNotification = (type, content) => {
+    setNotification({ type, content, trigger: true });
+    setTimeout(() => {
+      setNotification((prev) => ({ ...prev, trigger: false }));
+    }, 500);
+  };
 
   // Calculate payout based on amount and symbol
   useEffect(() => {
@@ -53,10 +69,21 @@ const EvenOddContract = () => {
     setPayout((amount * (1 + payoutMultiplier)).toFixed(2));
   }, [amount, symbol]);
 
-  const handleSubmit = (contractType) => {
+  const handleSubmit = async (contractType) => {
+    if (!user || !isAuthorized) {
+      console.error('User not authorized or no active account');
+      showNotification('warning', 'Please select an account and ensure it is authorized.');
+      return;
+    }
+
+    if (!amount || amount <= 0) {
+      console.error('Invalid amount');
+      showNotification('warning', 'Please enter a valid amount.');
+      return;
+    }
+
     setIsSubmitting(true);
 
-    // Generate a unique request ID for the contract
     const req_id = RequestIdGenerator.generateContractId();
 
     const contractData = {
@@ -66,17 +93,43 @@ const EvenOddContract = () => {
         amount: amount,
         basis: basis,
         contract_type: contractType === 'even' ? 'DIGITEVEN' : 'DIGITODD',
-        currency: user?.currency || 'USD',
+        currency: user.currency || 'USD',
         duration: duration,
         duration_unit: 't',
         symbol: symbol,
       },
-      loginid: user?.loginid,
+      loginid: user.loginid, // Ensured to be the activeAccount's loginid
       req_id: req_id,
     };
 
-    // Simulate API call - replace with your actual Deriv API call
-    console.log('Sending contract:', contractData);
+    try {
+      const response = await sendAuthorizedRequest(contractData);
+
+      const contractId = response?.buy?.contract_id;
+      if(!contractId) {
+        throw new Error('No contract_id returned form purchase');
+      }
+
+      const contract = {
+        contract_id:contractId,
+        type: contractType,
+        symbol,
+        status:'open',
+        details: {
+          amount,
+          currency:user.currency || 'USD'
+        },
+      };
+
+      addLiveContract(contract);
+      
+      showNotification('success', `Successfully purchased ${contractType === 'even' ? 'DIGITEVEN' : 'DIGITODD'} contract`);
+    } catch (error) {
+      console.error('Error purchasing contract:', error.message);
+      showNotification('error', `Failed to purchase contract: ${error.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const volatilityOptions = [
@@ -107,7 +160,32 @@ const EvenOddContract = () => {
       }}
     >
       <Row gutter={[24, 24]}>
+        <Notification
+          type={notification.type}
+          content={notification.content}
+          trigger={notification.trigger}
+        />
         <Col xs={24} md={16}>
+          {loading ? (
+            <Spin tip="Loading account details..." size="large" style={{ display: 'block', margin: '50px auto' }} />
+          ) : error ? (
+            <Alert
+              message="Error"
+              description={error}
+              type="error"
+              showIcon
+              style={{ marginBottom: 24 }}
+            />
+          ) : !user || !isAuthorized ? (
+            <Alert
+              message="No Active Account"
+              description="Please select an account and ensure it is authorized to proceed."
+              type="warning"
+              showIcon
+              style={{ marginBottom: 24 }}
+            />
+          ) : null}
+
           <Card
             title={
               <Space>
@@ -224,9 +302,10 @@ const EvenOddContract = () => {
                   precision={2}
                   prefix="$"
                   step={5}
+                  disabled={!user || !isAuthorized}
                 />
                 <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-                  Available balance: {user?.balance?.toFixed(2) || '0.00'} {user?.currency || 'USD'}
+                  Available balance: {(user?.balance || 0).toFixed(2)} {user?.currency || 'USD'}
                 </Text>
               </div>
 
@@ -275,7 +354,7 @@ const EvenOddContract = () => {
                     }}
                     onClick={() => handleSubmit('odd')}
                     loading={isSubmitting}
-                    disabled={isSubmitting || !user}
+                    disabled={isSubmitting || !user || !isAuthorized}
                   >
                     ODD
                   </Button>
@@ -288,7 +367,7 @@ const EvenOddContract = () => {
                     style={{ height: 48 }}
                     onClick={() => handleSubmit('even')}
                     loading={isSubmitting}
-                    disabled={isSubmitting || !user}
+                    disabled={isSubmitting || !user || !isAuthorized}
                   >
                     EVEN
                   </Button>

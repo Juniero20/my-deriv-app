@@ -1,0 +1,78 @@
+/* General styles for the header */
+.header {
+  position: fixed;
+  top: 0;
+  z-index: 10;
+  width: 100%;
+  background-color: var(--background-card);
+  color: var(--text-primary-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: background-color var(--transition-speed), color var(--transition-speed);
+}
+
+.header-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 10px 16px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+.logo-img {
+  height: 80px;
+  width: auto;
+}
+
+.logo-text {
+  color: var(--primary-color);
+  font-size: 18px;
+  font-weight: bold;
+  transition: color var(--transition-speed);
+}
+
+.header-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.header-button {
+  font-size: 14px;
+  background-color: var(--secondary-color);
+  color: var(--text-primary-color);
+  border: none;
+  padding: 8px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color var(--transition-speed), color var(--transition-speed);
+}
+
+.header-button:hover {
+  background-color: var(--secondary-hover-color);
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .header-container {
+    padding: 8px 12px;
+  }
+
+  .header-buttons {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .logo-img {
+    height: 50px;
+    padding: 0;
+    margin-left: 0;
+  }
+}

@@ -7,7 +7,11 @@ import TraderPage from './pages/trader/TraderPage';
 import WalletPage from './components/WalletPage';
 import UserProfile from './components/UserProfile';
 import SettingsPage from './components/SettingPage';
+import NotFoundPage from './pages/NotFoundPage';
 import { UserProvider } from './context/AuthContext';
+import { ContractsProvider } from './context/ContractsContext';
+import SignUpPage from './pages/login/SignUpPage';
+import PasswordForm from './pages/login/CreatePassword';
 
 function AppRoutes() {
   return (
@@ -15,11 +19,16 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path='/signup' element={<SignUpPage />} />
+        <Route path='/createpassword' element={<PasswordForm />} /> 
+        <Route path="*" element={<NotFoundPage />} />
         <Route 
           path="/dashboard" 
           element={
             <UserProvider>
-              <Dashboard />
+              <ContractsProvider>
+                <Dashboard />
+              </ContractsProvider>
             </UserProvider>
           }
         >
