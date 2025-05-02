@@ -27,7 +27,6 @@ const LoginPage = () => {
     setLoading(true);
     setError(null);
     try {
-      // Check if user exists
       const checkResponse = await checkUser({ email: values.email });
       if (!checkResponse.exists) {
         showNotification('warning', 'No account found. Please log in with Deriv first.');
@@ -35,10 +34,9 @@ const LoginPage = () => {
         return;
       }
 
-      // Attempt login
       const response = await login({ email: values.email, password: values.password });
       if (response.success) {
-        sessionStorage.setItem('sessionToken', response.sessionToken || 'temp-token');
+        sessionStorage.setItem('token', response.token);
         showNotification('success', 'Login successful!');
         navigate('/dashboard');
       } else {

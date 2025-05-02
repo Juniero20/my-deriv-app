@@ -17,7 +17,6 @@ const InitialSetup = () => {
     setTimeout(() => setNotification((prev) => ({ ...prev, trigger: false })), 3000);
   };
 
-  // Fetch user details using WebSocket
   useEffect(() => {
     const fetchUserDetails = async () => {
       try {
@@ -52,13 +51,11 @@ const InitialSetup = () => {
     fetchUserDetails();
   }, []);
 
-  // Handle password submission
   const handlePasswordSubmit = async (password) => {
     setLoading(true);
     try {
       const storedTokens = JSON.parse(sessionStorage.getItem('derivTokens'));
       if (!storedTokens) throw new Error('No tokens found');
-
 
       const response = await registerUser({
         full_name: userInfo.fullName,
@@ -69,11 +66,11 @@ const InitialSetup = () => {
 
       sessionStorage.removeItem('derivTokens');
 
-      if (!response.success || !response.sessionToken) {
+      if (!response.success || !response.token) {
         throw new Error(response.error || 'Registration failed');
       }
 
-      sessionStorage.setItem('sessionToken', response.sessionToken);
+      sessionStorage.setItem('token', response.token);
       showNotification('success', 'Account setup successful!');
       navigate('/dashboard');
     } catch (err) {

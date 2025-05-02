@@ -1,5 +1,5 @@
 export const checkUser = async ({ email }) => {
-    const API_URL = "http://localhost:8888/login/check_user.php";
+    const API_URL = "https://localhost:8888/login/check_user.php";
 
     try {
         const response = await fetch(API_URL, {
@@ -7,7 +7,6 @@ export const checkUser = async ({ email }) => {
             headers: {
                 "Content-Type": "application/json",
             },
-            credentials: "include", 
             body: JSON.stringify({ email })
         });
 

@@ -1,5 +1,5 @@
 export const registerUser = async ({ full_name, email, password, accounts }) => {
-    const API_URL = "http://localhost:8888/api/initial_setup.php";
+    const API_URL = "https://localhost:8888/api/initial_setup.php";
 
     try {
         const response = await fetch(API_URL, {
@@ -7,7 +7,6 @@ export const registerUser = async ({ full_name, email, password, accounts }) => 
             headers: {
                 "Content-Type": "application/json",
             },
-            credentials: "include",
             body: JSON.stringify({ fullName: full_name, email, password, accounts }),
         });
 
@@ -16,7 +15,7 @@ export const registerUser = async ({ full_name, email, password, accounts }) => 
             result = await response.json();
         } catch (e) {
             const text = await response.text();
-            console.error('Raw response:',e, text);
+            console.error('Raw response:', e, text);
             throw new Error('Invalid JSON response: ' + text);
         }
 

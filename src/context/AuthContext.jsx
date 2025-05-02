@@ -1,11 +1,11 @@
 import { createContext, useState, useEffect, useContext, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { derivWebSocket } from '../services/websocket_client';
 import Notification from '../utils/Notification';
 import { getTokens } from '../api/getTokens';
 
 const UserContext = createContext();
 
-// eslint-disable-next-line react-refresh/only-export-components
 export const useUser = () => {
   const context = useContext(UserContext);
   if (context === undefined) {
@@ -22,6 +22,7 @@ export const UserProvider = ({ children }) => {
   const [error, setError] = useState(null);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [notification, setNotification] = useState({ type: '', content: '', trigger: false });
+  const navigate = useNavigate();
 
   const activeAccountType = useMemo(() => (activeAccount?.is_virtual ? 'demo' : 'real'), [activeAccount]);
 
@@ -62,17 +63,25 @@ export const UserProvider = ({ children }) => {
       setIsAuthorized(false);
 
       try {
-        const sessionToken = sessionStorage.getItem('sessionToken');
-        if (!sessionToken) throw new Error('Not authenticated');
+        console.log('UserProvider: Checking for token...');
+        const token = sessionStorage.getItem('token');
+        console.log('UserProvider: Token found:', token);
+        if (!token) {
+          console.error('UserProvider: No token found, redirecting to login');
+          showNotification('error', 'Please log in to continue.');
+          navigate('/login');
+          throw new Error('Not authenticated');
+        }
 
-        console.log('Fetching tokens with sessionToken:', sessionToken);
-        const response = await getTokens();
-        const data = await response.json();
-        console.log('Tokens fetched:', data);
+        console.log('Initiating token fetch');
+        const data = await getTokens();
+        console.log('Tokens fetched successfully:', data);
 
-        if (!data.accounts || !data.accounts.length) throw new Error('No tokens found');
+        if (!data.accounts || !data.accounts.length) {
+          throw new Error('No tokens found');
+        }
 
-        const parsedAccounts = data.accounts; // Array of { loginid, token, currency }
+        const parsedAccounts = data.accounts;
 
         await connectWebSocket();
 
@@ -176,12 +185,15 @@ export const UserProvider = ({ children }) => {
         console.error('Error fetching user data:', err.message);
         showNotification('error', err.message);
         setError(err.message);
-        if (err.message.includes('Invalid token') || err.message.includes('Max WebSocket retries')) {
+        if (err.message.includes('Invalid or expired token') || err.message.includes('Not authenticated') || err.message.includes('Unauthorized')) {
+          sessionStorage.removeItem('token');
           sessionStorage.removeItem('activeAccountLoginid');
           sessionStorage.removeItem('derivLoginTokenMap');
           setActiveAccount(null);
           setAccounts({ real: [], demo: [] });
           setIsAuthorized(false);
+          showNotification('error', 'Session expired. Please log in again.');
+          navigate('/login');
         }
       } finally {
         setLoading(false);
@@ -198,7 +210,7 @@ export const UserProvider = ({ children }) => {
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, []);
+  }, [navigate]);
 
   const handleWebSocketMessage = (data) => {
     if (data.error) {
@@ -207,8 +219,11 @@ export const UserProvider = ({ children }) => {
         setError('Session expired. Please log in again.');
         setActiveAccount(null);
         setIsAuthorized(false);
+        sessionStorage.removeItem('token');
         sessionStorage.removeItem('activeAccountLoginid');
         sessionStorage.removeItem('derivLoginTokenMap');
+        showNotification('error', 'Session expired. Please log in again.');
+        navigate('/login');
       }
       return;
     }

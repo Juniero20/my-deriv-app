@@ -1,13 +1,12 @@
 export const login = async ({ email, password }) => {
-    const API_URL = "http://localhost:8888/login/login_user.php";
+    const API_URL = "https://localhost:8888/login/login_user.php";
 
     try {
         const response = await fetch(API_URL, {
             method: "POST",
             headers: {
-                "Content-Type": "application/json", 
+                "Content-Type": "application/json",
             },
-            credentials: "include",
             body: JSON.stringify({ email, password }),
         });
 
